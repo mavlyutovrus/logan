@@ -79,7 +79,6 @@ if __name__ == "__main__":
             pickle.dump((fname, root_node), out)
             out.close()
             fname2ast_loc[fname] = ast_loc
-        break
 
     all_packages = set()
     all_classes_decls = {}
