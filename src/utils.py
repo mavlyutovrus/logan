@@ -3,8 +3,6 @@ import sys
 
 sys.setrecursionlimit(100000)
 
-
-
 def fname2code(fname):
     import hashlib
     m = hashlib.md5()
@@ -197,6 +195,15 @@ METHOD_DECL_LABELS = set(["body.MethodDeclaration", "body.ConstructorDeclaration
 COMMENTS_LABELS = set(['comments.LineComment', 'comments.BlockComment'])
 
 
+def is_statement(node):
+    if not node:
+        return False
+    for label in node.labels:
+        if label.startswith("stmt."):
+            return True
+    return False
+
+
 def decompose_method_call(node, source):
     if not "expr.MethodCallExpr" in node.labels:
         return (None, None, None, [])
@@ -261,7 +268,9 @@ def decompose_method_call(node, source):
         delimiter = "\n".join(chunk.split("//")[0] for chunk in delimiter.split("\n"))
         delimiter = re.subn("/\*.+?\*/", " ", delimiter.replace("\n", " "))[0]
         delimiter = delimiter.strip()
-        if delimiter != ",":
+        #if delimiter != ",":
+        if not "," in delimiter:
+            print node.get_snippet(source)
             raise Exception("can't parse method call", "unknown delimiter for method params: [" + delimiter + "]")
     return (caller_node, method_name_node, method_type_values_nodes, param_nodes)
 
@@ -729,7 +738,6 @@ def markup2tree(markup, source=None):
             start = child.end
     return root
 
-
 def cortesian_sum(list_of_lists):
     if not list_of_lists:
         return []
@@ -794,7 +802,7 @@ def collect_java_sources(path):
     for dir, _, fnames in os.walk(os.path.expanduser(path)):
         for fname in fnames:
             if fname.endswith(".java"):
-                yield os.path.join(dir, fname)
+                yield os.path.abspath(os.path.join(dir, fname))
 
 
 

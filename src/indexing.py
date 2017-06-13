@@ -55,6 +55,8 @@ if __name__ == "__main__":
     import sys
     import os
     import pickle
+    import shelve
+
     try:
         _, sources_root_folder, index_folder = sys.argv[:3]
         build_dump = "-d" in sys.argv
@@ -62,23 +64,22 @@ if __name__ == "__main__":
         print "usage: python indexing.py <root folder of java sources> <folder for indices> [-d]"
         exit()
 
+    markup_db_loc = os.path.join(index_folder, "markup.db")
+    if os.path.exists(markup_db_loc):
+        os.remove(markup_db_loc)
+    markup_db = shelve.open(markup_db_loc)
 
     sources_fnames = [fname for fname in collect_java_sources(sources_root_folder)]
+    sources_fnames.sort()
     print "source files:", len(sources_fnames)
-    print """building asts"""
-    fname2ast_loc = {}
+    print """building ASTs"""
     BATCH_SIZE = 1000
-    index = 0
+    processed = 0
     for batch_start in xrange(0, len(sources_fnames), BATCH_SIZE):
         print "\tbatch", batch_start, "-", batch_start + BATCH_SIZE
         for fname, root_node in build_asts(sources_fnames[batch_start:batch_start + BATCH_SIZE]):
-            index += 1
-            coded = str(fname2code(fname)) + "_" + str(index)
-            ast_loc = os.path.join(index_folder, coded + ".ast")
-            out = open(ast_loc, "wb")
-            pickle.dump((fname, root_node), out)
-            out.close()
-            fname2ast_loc[fname] = ast_loc
+            markup_db[fname] = root_node.ToString()
+    markup_db.sync()
 
     all_packages = set()
     all_classes_decls = {}
@@ -88,13 +89,33 @@ if __name__ == "__main__":
     class2parents = {}
     full_type_markup = {}
 
-
-    paths = [("", os.path.join(index_folder, path)) for path in os.listdir(index_folder)]
-
     print """initial data collect"""
-    for fname, ast_loc in fname2ast_loc.items():
-        fname, root = pickle.load(open(ast_loc, "rb"))
-        collect_indexing_data_impl(fname, root, all_packages, all_classes_decls, all_methods, all_names, all_public_vars)
+    processed = 0
+    for fname, serialized_root in markup_db.items():
+        processed += 1
+        if processed % 1000 == 0:
+            print "..processed", processed
+        root = FromString2Node(serialized_root)
+        collect_indexing_data_impl(fname, root, all_packages, all_classes_decls, all_methods, all_names,
+                                   all_public_vars)
+
+
+    print """group classes by suffixes and prefixes"""
+    defined_classes_by_suffix = {}
+    defined_classes_by_prefix = {}
+    for class_full_name in all_classes_decls.keys():
+        chunks = class_full_name.split(".")
+        for index in xrange(len(chunks)):
+            prefix = ".".join(chunks[:index + 1])
+            defined_classes_by_prefix.setdefault(prefix + ".", []).append(class_full_name)
+            suffix = ".".join(chunks[index:])
+            defined_classes_by_suffix.setdefault("." + suffix, []).append(class_full_name)
+
+    print """class methods index"""
+    method_name2full_names = {}
+    for method_full_name in all_methods.keys():
+        method_name = method_full_name.split(".")[-1]
+        method_name2full_names.setdefault(method_name, []).append(method_full_name)
 
     print """infer full types of classes' parents"""
     for class_full_name, (type_param_names, package_name, imports, extends_parsed_strs, fname) in all_classes_decls.items():
@@ -102,29 +123,34 @@ if __name__ == "__main__":
                                                         package_name,
                                                         class_full_name,
                                                         imports,
-                                                        all_classes_decls)
+                                                        all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix)
                                         for extended_class_name in extends_parsed_strs]
         extends_parsed_strs = [value for value in extends_parsed_strs if value]
         if extends_parsed_strs:
             class2parents[class_full_name] = extends_parsed_strs
 
-    print """temporary methods index"""
-    method_name2full_names = {}
-    for method_full_name in all_methods.keys():
-        method_name = method_full_name.split(".")[-1]
-        method_name2full_names.setdefault(method_name, []).append(method_full_name)
-
     print """inferring full types of classes' properties"""
-    for fname, ast_loc in fname2ast_loc.items():
-        fname, root = pickle.load(open(ast_loc, "rb"))
-        infer_types_of_class_properties(fname, root, all_packages, all_names, all_public_vars, all_methods, all_classes_decls)
+    processed = 0
+    for fname, serialized_root in markup_db.items():
+        processed += 1
+        if processed % 1000 == 0:
+            print "..processed", processed
+        root = FromString2Node(serialized_root)
+        infer_types_of_class_properties(fname, root, all_packages, all_names, all_public_vars, all_methods,
+                                        all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix)
 
-    print """inferring full types of variables"""
+
+    print """inferring full types of local variables"""
+    processed = 0
     var_types_inference_stat = [0, 0, 0, 0]
-    for fname, ast_loc in fname2ast_loc.items():
-        fname, root = pickle.load(open(ast_loc, "rb"))
+    for fname, serialized_root in markup_db.items():
+        processed += 1
+        if processed % 1000 == 0:
+            print "..processed", processed
+        root = FromString2Node(serialized_root)
         infer_types_of_vars_impl(fname, root, all_packages, all_names, all_public_vars,
                                  all_methods, method_name2full_names, class2parents, all_classes_decls,
+                                 defined_classes_by_prefix, defined_classes_by_suffix,
                                  full_type_markup, var_types_inference_stat)
 
     print "uniq names", len(all_names)
@@ -132,9 +158,10 @@ if __name__ == "__main__":
     print "class methods", len(all_methods)
     print "classes with defined parent classes", len(class2parents)
     print "total class delcarations", len(all_classes_decls)
+    print "full type markup", len(full_type_markup)
 
     print """saving"""
-    pickle.dump([fname2ast_loc,
+    pickle.dump([
                  all_names,
                  all_packages,
                  all_classes_decls,

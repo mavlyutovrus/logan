@@ -115,9 +115,7 @@ def find_all_var_declarations(class_node, source):
     var_decs = []
     def process(stack):
         node = stack[-1]
-        if node != class_node and node.labels & set(['body.ClassOrInterfaceDeclaration', 'body.EnumDeclaration',
-                                                     'body.ClassDeclaration', 'body.InterfaceDeclaration',
-                                                     'body.AnnotationDeclaration']):
+        if node != class_node and node.labels & CLASS_LABELS:
             return False
         if "stmt.CatchClause" in node.labels:
             for item in get_var_decs_from_catch_clause(node):

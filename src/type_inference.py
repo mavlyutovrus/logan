@@ -6,7 +6,7 @@ def get_full_type_of_extends(type_snippet,
                              package_name,
                              class_full_name,
                              imports,
-                             all_defined_classes):
+                             all_defined_classes, defined_classes_by_prefix, defined_classes_by_suffix):
 
     type_snippet = type_snippet.split("<")[0] \
         .replace("[]", "") \
@@ -50,17 +50,12 @@ def get_full_type_of_extends(type_snippet,
         if package_name + "." + type_snippet in all_defined_classes:
             full_type = package_name + "." + type_snippet
     if not full_type:
-        hypos = []
-        for full_class_fname in all_defined_classes.keys():
-            if full_class_fname.startswith(package_name) and ("." + full_class_fname).endswith("." + type_snippet):
-                hypos += [full_class_fname]
+        hypos = defined_classes_by_suffix.get("." + type_snippet, [])
+        hypos = [hypo for hypo in hypos if hypo.startswith(package_name + ".")]
         if len(hypos) == 1:
             full_type = hypos[0]
     if not full_type and not hypos:
-        hypos = []
-        for full_class_fname in all_defined_classes.keys():
-            if ("." + full_class_fname).endswith("." + type_snippet):
-                hypos += [full_class_fname]
+        hypos = defined_classes_by_suffix.get("." + type_snippet, [])
         if len(hypos) == 1:
             full_type = hypos[0]
     # if not full_type:
@@ -73,7 +68,7 @@ def get_full_type(type_node, source,
             class_methods_type_params,
             visible_classes,
             external_imports,
-            all_defined_classes):
+            all_defined_classes, defined_classes_by_prefix, defined_classes_by_suffix):
     # TODO: add visibility from the inherited classes
     type_snippet = type_node.get_snippet(source)
     type_snippet = type_snippet.split("<")[0] \
@@ -126,24 +121,22 @@ def get_full_type(type_node, source,
     if not full_type:
         if package_name + "." + type_snippet in all_defined_classes:
             full_type = package_name + "." + type_snippet
+
     if not full_type:
-        hypos = []
-        for full_class_fname in all_defined_classes.keys():
-            if full_class_fname.startswith(package_name) and ("." + full_class_fname).endswith("." + type_snippet):
-                hypos += [full_class_fname]
+        hypos = defined_classes_by_suffix.get("." + type_snippet, [])
+        hypos = [hypo for hypo in hypos if hypo.startswith(package_name + ".")]
         if len(hypos) == 1:
             full_type = hypos[0]
+
     if not full_type and not hypos:
-        hypos = []
-        for full_class_fname in all_defined_classes.keys():
-            if ("." + full_class_fname).endswith("." + type_snippet):
-                hypos += [full_class_fname]
+        hypos = defined_classes_by_suffix.get("." + type_snippet, [])
         if len(hypos) == 1:
             full_type = hypos[0]
     return full_type
 
 
-def infer_types_of_class_properties(fname, nodes, all_packages, all_names, all_public_vars, all_methods, all_classes_decls):
+def infer_types_of_class_properties(fname, nodes, all_packages, all_names, all_public_vars, all_methods,
+                                    all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix):
     source = open(fname).read()
 
     classes = []
@@ -178,10 +171,10 @@ def infer_types_of_class_properties(fname, nodes, all_packages, all_names, all_p
         if imported in all_methods:
             matched = True
         if not matched:
-            for class_full_name in all_classes_decls.keys():
-                if (class_full_name + ".").startswith(imported + "."):
-                    visible_classes += [class_full_name]
-                    matched = True
+            visible_classes_add = defined_classes_by_prefix.get(imported + ".", [])
+            visible_classes += visible_classes_add
+            if visible_classes_add:
+                matched = True
         if not matched:
             external_imports.append(imported)
 
@@ -208,8 +201,7 @@ def infer_types_of_class_properties(fname, nodes, all_packages, all_names, all_p
                               [],
                               visible_classes,
                               external_imports,
-                              all_classes_decls)
-
+                              all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix)
                 #if not full_type and type_node:
                 #    print "ASDASDFDF", [var_name.get_snippet(source)], fname
                 all_public_vars[var_full_path] = (var_name, type_node, full_type, value_node, fname)
@@ -222,7 +214,8 @@ def infer_types_of_class_properties(fname, nodes, all_packages, all_names, all_p
 
 def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_vars,
                              all_methods, method_name2full_names, class2parents,
-                             all_classes_decls, full_type_markup, stat):
+                             all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix,
+                             full_type_markup, stat):
     source = open(fname).read()
     classes = []
     for node in all_nodes(nodes):
@@ -258,16 +251,14 @@ def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_v
             visible_methods += [imported]
             matched = True
         if not matched:
-            for class_full_name in all_classes_decls.keys():
-                if (class_full_name + ".").startswith(imported + "."):
-                    visible_classes += [class_full_name]
-                    matched = True
+            if imported + "." in defined_classes_by_prefix:
+                visible_classes += defined_classes_by_prefix[imported + "."]
+                matched = True
         if not matched:
             external_imports.append(imported)
 
     for class_node in classes:
         class_name, type_parameters_parsed, extends_parsed_strs = parse_class_declaration(class_node, source)
-        type_params_names = set([type_name_node.get_snippet(source) for type_name_node, _ in type_parameters_parsed])
         parents = [other_class_node for other_class_node in classes \
                    if other_class_node.start < class_node.start and other_class_node.end >= class_node.end]
         parents = sorted(parents, key=lambda class_node: class_node.start)
@@ -275,16 +266,6 @@ def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_v
                                             parents] + \
                           [class_name.get_snippet(source)]
         class_full_name = ".".join(class_full_name)
-
-        """
-        extends_parsed_strs = [get_full_type_of_extends(extended_class_name,
-                                                 package_name,
-                                                 class_full_name,
-                                                 visible_classes,
-                                                 external_imports) or extended_class_name
-                                        for extended_class_name in extends_parsed_strs]
-        full_type_markup[class_full_name] = extends_parsed_strs
-        """
 
         class_methods_type_params = []
         for node in class_node.children:
@@ -311,15 +292,13 @@ def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_v
                                       class_methods_type_params,
                                       visible_classes,
                                       external_imports,
-                                      all_classes_decls)
+                                      all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix)
             var_name_snippet = var_name.get_snippet(source).replace("[]", "").strip()
             vars_full_types.append((var_name_snippet, full_type, scope))
             full_type_markup[(fname, var_name.start, var_name.end)] = (full_type, (fname, var_name.start, var_name.end))
             by_local_vname.setdefault(var_name_snippet, []).append((full_type, var_name, type_node, value_node, scope))
 
         simple_names_in_class = []
-
-
         def collect_simple_names(stack):
             if stack[-1] != class_node and stack[-1].labels & CLASS_LABELS: #do not go into subclusses
                 return False
@@ -340,7 +319,7 @@ def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_v
                                       class_methods_type_params,
                                       visible_classes,
                                       external_imports,
-                                      all_classes_decls)
+                                      all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix)
             if full_type:
                 full_type_markup[(fname, node.start, node.end)] = (full_type, "")
                 continue
@@ -440,7 +419,7 @@ def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_v
                                                    class_methods_type_params,
                                                    visible_classes,
                                                    external_imports,
-                                                   all_classes_decls)
+                                                   all_classes_decls, defined_classes_by_prefix, defined_classes_by_suffix)
                 if possible_full_type:
                     layer = set([possible_full_type])
 
@@ -481,8 +460,7 @@ def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_v
                             layer = set([hypo for hypo in all_default_classes if
                                          ("." + hypo).endswith("." + public_var_type_short)])
                             if not layer:
-                                layer = set([hypo for hypo in all_classes_decls.keys() if
-                                             hypo.endswith("." + public_var_type_short)])
+                                layer = set(defined_classes_by_suffix.get("." + public_var_type_short, []))
                             break
                 if 0:
                     if not layer:
