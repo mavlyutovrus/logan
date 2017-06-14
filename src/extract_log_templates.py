@@ -1,16 +1,19 @@
 from utils import *
 import pickle
 import os
+import shelve
 from find_var_defs import find_all_var_declarations
 
 THIS = 3224232434
 
 class LogExtractor(object):
-    def __init__(self, index_folder):
+    def __init__(self, index_folder, output_loc):
         self.index_folder = index_folder
-        (self.fname2ast_loc, self.all_names, self.all_packages, self.all_classes_decls,
+        (self.all_names, self.all_packages, self.all_classes_decls,
                self.all_methods, self.all_public_vars, self.class2parents, self.full_type_markup) = \
                                 pickle.load(open(os.path.join(index_folder, "source_index.b"), "rb"))
+        markup_db_loc = os.path.join(index_folder, "markup.db")
+        self.markup_db = shelve.open(markup_db_loc, flag='r')
 
         self.full_method_name2calls = {}
         for (fname, call_start, call_end), full_method_name in self.full_type_markup.items():
@@ -23,11 +26,25 @@ class LogExtractor(object):
             self.method_name2full_names.setdefault(method_name, []).append(method_full_name)
 
         self.fname2classes = {}
-        for class_full_name, (type_param_names, package_name, imports, extends_parsed_strs, (class_start, class_end, fname)) \
-                                                                                    in self.all_classes_decls.items():
+        for class_full_name, (type_param_names, package_name, imports, extends_parsed_strs,
+                                            (class_start, class_end, fname))  in self.all_classes_decls.items():
             self.fname2classes.setdefault(fname, []).append(class_full_name)
-
         self.stack_of_expansions = []
+
+        self.logging = open("logging.txt", "w")
+        self.output = output_loc == "-" and sys.stdout or open(output_loc, "w")
+        self.extracted_log_templates = []
+        processed = 0
+        for fname, root_node_str in self.markup_db.items():
+            root_node = FromString2Node(root_node_str)
+            self.extract_log_lines(fname, root_node)
+            self.output.flush()
+            processed += 1
+            if processed % 100 == 0:
+                self.logging.write("..processed " + str(processed) + "\n")
+                self.logging.flush()
+        self.logging.close()
+        self.output.flush()
 
 
     def extract_log_calls_from_method_declartion(self, method_decl_node, source):
@@ -63,7 +80,7 @@ class LogExtractor(object):
             orig_fname, orig_start, orig_end = origin
         except:
             return []
-        _, orig_file_tree = pickle.load(open(self.fname2ast_loc[orig_fname], "rb"))
+        orig_file_tree =  FromString2Node(self.markup_db[orig_fname])
 
         origin_node = [node for node in all_nodes(orig_file_tree) if node.start == orig_start and node.end == orig_end][0]
         origin_class_full_name = ""
@@ -222,8 +239,8 @@ class LogExtractor(object):
         if orig_fname != fname or orig_start < method_node.start or orig_end > method_node.end:
             return []
         origin_node = [node for node in all_nodes(method_node) if node.start == orig_start and node.end == orig_end][0]
-        origin_value = [cur_value_node for cur_var_name, _, cur_value_node, _ in find_all_var_declarations(method_node, source)
-                                    if cur_var_name.start == origin_node.start and cur_var_name.end == origin_node.end][0]
+        #origin_value = [cur_value_node for cur_var_name, _, cur_value_node, _ in find_all_var_declarations(method_node, source)
+        #                            if cur_var_name.start == origin_node.start and cur_var_name.end == origin_node.end][0]
 
         #if params propagate to parent methods
         _, method_name_node, params, _ = parse_method_declaration(class_node, method_node, source)
@@ -248,7 +265,7 @@ class LogExtractor(object):
             #print " " * offset, "var:", var_name, "type:", full_type
             for caller_fname, caller_node_start, caller_node_end in self.full_method_name2calls[method_full_name]:
                 caller_source = open(caller_fname).read()
-                caller_file_tree = pickle.load(open(self.fname2ast_loc(caller_fname), "rb"))
+                caller_file_tree =  FromString2Node(self.markup_db[caller_fname])
                 caller_method_node = None
                 for node in all_nodes(caller_file_tree):
                     if node.start == caller_node_start and node.end == caller_node_end:
@@ -320,7 +337,6 @@ class LogExtractor(object):
             return True
         method_node.DFS1([], find_variable_updates)
         return [assignement.children[1:] for assignement in variable_assignement_nodes]
-
 
     def expand_stringbuilder_var(self, stringbuilder_var_node, root_node, source):
         path2var_node = build_path(stringbuilder_var_node, root_node)
@@ -467,10 +483,6 @@ class LogExtractor(object):
         #print len(branches_keys), branches_keys, branches
         return final_chains
 
-
-
-
-
     def expand(self, node, source, get_var_type_func, root_node, fname, class_full_name, class_node):
         if type(node) != TNode:
             stack_key = (node, class_full_name, root_node and root_node.start or -1, root_node and root_node.end or -1)
@@ -616,9 +628,8 @@ class LogExtractor(object):
                         continue
                     if not "expr.StringLiteralExpr" in subnode.labels:
                         #TODO: expand
-                        print "FUCKU11111P1111"
+                        raise Exception("MessageFromat expansion fails", "Expected string constant, got smth else: " + " ".join(subnode.labels))
                         return [[node]]
-                        exit()
                     format_string += subnode.get_snippet(source).strip()[1:-1]
                 by_pos = []
                 keys = []
@@ -637,7 +648,7 @@ class LogExtractor(object):
                 if 1:
                     outputs = [[]]
                     for subnode in unrolled:
-                        suffixes = expand(subnode, source, get_var_type_func, root_node, fname, class_full_name, class_node)
+                        suffixes = self.expand(subnode, source, get_var_type_func, root_node, fname, class_full_name, class_node)
                         new_outputs = []
                         for output in outputs:
                             for suffix in suffixes:
@@ -672,7 +683,7 @@ class LogExtractor(object):
                 if 1:
                     outputs = [[]]
                     for subnode in unrolled:
-                        suffixes = expand(subnode, source, get_var_type_func, root_node, fname, class_full_name, class_node)
+                        suffixes = self.expand(subnode, source, get_var_type_func, root_node, fname, class_full_name, class_node)
                         new_outputs = []
                         for output in outputs:
                             for suffix in suffixes:
@@ -700,154 +711,151 @@ class LogExtractor(object):
         #if "type.PrimitiveType" in node.labels:
         #    continue
 
-
-
-def get_log_line_constitutes(log_call_stack, source, fname, class_full_name, class_node, get_var_type_func):
-    log_call_node = log_call_stack[-1]
-    caller_node, method_name_node, method_type_values_nodes, parameters = decompose_method_call(log_call_node, source)
-    #print log_call_node.get_snippet(source).replace("\n", " ")
-    #print "---"
-    if not parameters:
-        return None
-    expanded_params_chains = [expand(param, source, get_var_type_func, log_call_stack[0], fname, class_full_name, class_node) for param in parameters]
-    unrolled_chains = [[item] for item in expanded_params_chains[0]]
-    expanded_params_chains = expanded_params_chains[1:]
-    while expanded_params_chains:
-        next_chunk = expanded_params_chains[0]
+    def get_log_line_constitutes(self, log_call_stack, source, fname, class_full_name, class_node, get_var_type_func):
+        log_call_node = log_call_stack[-1]
+        caller_node, method_name_node, method_type_values_nodes, parameters = decompose_method_call(log_call_node, source)
+        #print log_call_node.get_snippet(source).replace("\n", " ")
+        #print "---"
+        if not parameters:
+            return None
+        expanded_params_chains = [self.expand(param, source, get_var_type_func, log_call_stack[0], fname, class_full_name, class_node) for param in parameters]
+        unrolled_chains = [[item] for item in expanded_params_chains[0]]
         expanded_params_chains = expanded_params_chains[1:]
-        new_all_chains = []
-        for chain in unrolled_chains:
-            for add_chain in next_chunk:
-                new_all_chains += [chain + [add_chain]]
-        unrolled_chains = new_all_chains
-    return unrolled_chains
+        while expanded_params_chains:
+            next_chunk = expanded_params_chains[0]
+            expanded_params_chains = expanded_params_chains[1:]
+            new_all_chains = []
+            for chain in unrolled_chains:
+                for add_chain in next_chunk:
+                    new_all_chains += [chain + [add_chain]]
+            unrolled_chains = new_all_chains
+        return unrolled_chains
 
+    def extract_log_lines(self, fname, file_node):
+        if not fname in self.fname2classes:
+            return
+        source = open(fname).read()
+        for class_full_name in self.fname2classes[fname]:
+            type_param_names, package_name, imports, extends_parsed_strs, (class_start, class_end, fname) = self.all_classes_decls[class_full_name]
+            class_node = [node for node in all_nodes(file_node) if node.start == class_start and node.end == class_end][0]
+            method_declarations = [node for node in class_node.children \
+                                            if set(["body.MethodDeclaration", "body.ConstructorDeclaration"]) & node.labels]
 
+            class_variables = find_all_var_declarations(class_node, source)
 
-processed = [0]
+            # "[CLASS]", class_full_name
+            for method_decl_node in method_declarations:
+                #print "[METHOD]", method_decl_node.get_snippet(source).replace("\n", " ")[:300]
+                for log_call_stack in self.extract_log_calls_from_method_declartion(method_decl_node, source):
+                    #print
+                    #print fname, class_full_name
+                    #print "[LOG CALL]", (log_call_stack[-1].start, log_call_stack[-1].end), log_call_stack[-1].get_snippet(source).replace("\n", " ")
+                    def get_var_type_func(node, fname=fname):
+                        key = (fname, node.start, node.end)
+                        if key in self.full_type_markup and type(self.full_type_markup[key]) == tuple:
+                            return self.full_type_markup[key][0]
+                        return None
 
-def extract_log_lines(fname, file_node):
-    processed[0] += 1
-    if processed[0] % 100 == 0:
-        print "..processed", processed
-    if not fname in fname2classes:
-        return
-    #if not fname in ["/home/arslan/src/provenance/hadoop/hadoop-hdfs-project/hadoop-hdfs-nfs/src/main/java/org/apache/hadoop/hdfs/nfs/nfs3/WriteCtx.java"]:
-    #    return
-    source = open(fname).read()
-    for class_full_name in fname2classes[fname]:
-        type_param_names, package_name, imports, extends_parsed_strs, (class_start, class_end, fname) = all_classes_decls[class_full_name]
-        class_node = [node for node in all_nodes(file_node) if node.start == class_start and node.end == class_end][0]
-        method_declarations = [node for node in class_node.children \
-                                        if set(["body.MethodDeclaration", "body.ConstructorDeclaration"]) & node.labels]
-
-        class_variables = find_all_var_declarations(class_node, source)
-
-        #print "[CLASS]", class_full_name
-        for method_decl_node in method_declarations:
-            #print "[METHOD]", method_decl_node.get_snippet(source).replace("\n", " ")[:300]
-            for log_call_stack in extract_log_calls_from_method_declartion(method_decl_node, source):
-                print
-                print fname, class_full_name
-                print "[LOG CALL]", (log_call_stack[-1].start, log_call_stack[-1].end), log_call_stack[-1].get_snippet(source).replace("\n", " ")
-                def get_var_type_func(node, fname=fname):
-                    key = (fname, node.start, node.end)
-                    if key in full_type_markup and type(full_type_markup[key]) == tuple:
-                        return full_type_markup[key][0]
-                    return None
-
-                unrolled_log_line_elements = get_log_line_constitutes(log_call_stack, source, fname, class_full_name, class_node, get_var_type_func)
-                if not unrolled_log_line_elements:
-                    continue
-                if 1:
-                    unrolled_log_line_elements_merged = []
+                    unrolled_log_line_elements = self.get_log_line_constitutes(log_call_stack, source, fname, class_full_name,
+                                                                               class_node, get_var_type_func)
+                    if not unrolled_log_line_elements:
+                        continue
                     if 1:
-                        for unrolled_param_set in unrolled_log_line_elements:
-                            final_set_of_nodes = []
-                            first_param_nodes = unrolled_param_set[0]
-                            used_params = set()
-                            curr_param_index = 1
-                            added_param_sets = 0
-                            for node in first_param_nodes:
-                                if type(node) != str:
-                                    final_set_of_nodes.append(node)
+                        unrolled_log_line_elements_merged = []
+                        if 1:
+                            for unrolled_param_set in unrolled_log_line_elements:
+                                final_set_of_nodes = []
+                                first_param_nodes = unrolled_param_set[0]
+                                used_params = set()
+                                curr_param_index = 1
+                                added_param_sets = 0
+                                for node in first_param_nodes:
+                                    if type(node) != str:
+                                        final_set_of_nodes.append(node)
+                                        continue
+                                    string_constant = node
+                                    placeholders = re.findall("\{[0-9]*\}", string_constant)
+                                    # print placeholders, [string_constant], unrolled_param_set
+                                    for placeholder in placeholders:
+                                        plhld_pos = string_constant.find(placeholder)
+                                        prefix, string_constant = string_constant[:plhld_pos], string_constant[
+                                                                                               plhld_pos + len(placeholder):]
+                                        if prefix:
+                                            final_set_of_nodes.append(prefix)
+                                        if placeholder[1:-1]:
+                                            curr_param_index = int(placeholder[1:-1]) + 1
+
+                                        if curr_param_index >= len(unrolled_param_set):
+                                            print "WTF:", [curr_param_index], unrolled_param_set
+                                            curr_param_index = len(unrolled_param_set) - 1
+                                        used_params.add(curr_param_index)
+                                        final_set_of_nodes += unrolled_param_set[curr_param_index]
+                                        added_param_sets += 1
+                                        curr_param_index += 1
+                                    if string_constant:
+                                        final_set_of_nodes.append(string_constant)
+                                for param_index in xrange(1, len(unrolled_param_set)):
+                                    if not param_index in used_params:
+                                        final_set_of_nodes += unrolled_param_set[param_index]
+                                        added_param_sets += 1
+                                if added_param_sets + 1 != len(unrolled_param_set):
+                                    print "FADASDADSFADSFASDFASDFADAFUKUCUP", added_param_sets, len(unrolled_param_set)
+                                    print log_call_stack[-1].get_snippet(source)
+                                    print "----"
+                                unrolled_log_line_elements_merged += [final_set_of_nodes]
+
+                        for log_line_nodes in unrolled_log_line_elements_merged:
+                            log_chunks = []
+                            for elem in log_line_nodes:
+                                #print "elem", elem
+                                if type(elem) == str:
+                                    log_chunks += [("SC", "String", elem)]
                                     continue
-                                string_constant = node
-                                placeholders = re.findall("\{[0-9]*\}", string_constant)
-                                # print placeholders, [string_constant], unrolled_param_set
-                                for placeholder in placeholders:
-                                    plhld_pos = string_constant.find(placeholder)
-                                    prefix, string_constant = string_constant[:plhld_pos], string_constant[
-                                                                                           plhld_pos + len(placeholder):]
-                                    if prefix:
-                                        final_set_of_nodes.append(prefix)
-                                    if placeholder[1:-1]:
-                                        curr_param_index = int(placeholder[1:-1]) + 1
-
-                                    if curr_param_index >= len(unrolled_param_set):
-                                        print "WTF:", [curr_param_index], unrolled_param_set
-                                        curr_param_index = len(unrolled_param_set) - 1
-                                    used_params.add(curr_param_index)
-                                    final_set_of_nodes += unrolled_param_set[curr_param_index]
-                                    added_param_sets += 1
-                                    curr_param_index += 1
-                                if string_constant:
-                                    final_set_of_nodes.append(string_constant)
-                            for param_index in xrange(1, len(unrolled_param_set)):
-                                if not param_index in used_params:
-                                    final_set_of_nodes += unrolled_param_set[param_index]
-                                    added_param_sets += 1
-                            if added_param_sets + 1 != len(unrolled_param_set):
-                                print "FADASDADSFADSFASDFASDFADAFUKUCUP", added_param_sets, len(unrolled_param_set)
-                                print log_call_stack[-1].get_snippet(source)
-                                print "----"
-                            unrolled_log_line_elements_merged += [final_set_of_nodes]
-
-                    for log_line_nodes in unrolled_log_line_elements_merged:
-                        serialized_param = []
-                        for elem in log_line_nodes:
-                            #print "elem", elem
-                            if type(elem) == str:
-                                serialized_param += ["SC:" + elem]
-                                continue
-                            node, node_source, node_fname, node_class_full_name = elem
-                            if node == THIS:
-                                serialized_param += ["VR:" + node_class_full_name + ":::this"]
-                            elif set(["expr.SimpleName", "expr.NameExpr"]) & node.labels:
-                                node_type = get_var_type_func(node, node_fname)
-                                node_snippet = node.get_snippet(node_source).strip().replace("\n", " ")
-                                serialized_param += ["VR:" + str(node_type) + ":::" + node_snippet]
-                            elif "expr.MethodCallExpr" in node.labels or "expr.FieldAccessExpr" in node.labels:
-                                caller_type = None
-                                node_snippet = node.get_snippet(node_source).strip().replace("\n", " ")
-                                if node_snippet.find("(") > 0 and node_snippet.find("(") < node.get_snippet(node_source).find(
-                                        ".") or node.get_snippet(node_source).find(".") < 0:
-                                    # print "CHEEECK", node_snippet
-                                    caller_type = node_class_full_name
-                                else:
-                                    caller = node
-                                    while caller.children:
-                                        caller = caller.children[0]
-                                    caller_snippet = caller.get_snippet(node_source).strip()
-                                    if "expr.ThisExpr" in caller.labels:
+                                node, node_source, node_fname, node_class_full_name = elem
+                                if node == THIS:
+                                    log_chunks += [("VR", node_class_full_name, "this")]
+                                elif set(["expr.SimpleName", "expr.NameExpr"]) & node.labels:
+                                    node_type = get_var_type_func(node, node_fname)
+                                    node_snippet = node.get_snippet(node_source).strip().replace("\n", " ")
+                                    log_chunks += [("VR", str(node_type), node_snippet)]
+                                elif "expr.MethodCallExpr" in node.labels or "expr.FieldAccessExpr" in node.labels:
+                                    caller_type = None
+                                    node_snippet = node.get_snippet(node_source).strip().replace("\n", " ")
+                                    if node_snippet.find("(") > 0 and node_snippet.find("(") < node.get_snippet(node_source).find(
+                                            ".") or node.get_snippet(node_source).find(".") < 0:
+                                        # print "CHEEECK", node_snippet
                                         caller_type = node_class_full_name
-                                    elif caller_snippet.startswith("org.") or caller_snippet.startswith("java.") or \
-                                            caller_snippet[0].isupper():
-                                        caller_type = caller_snippet
                                     else:
-                                        caller_type = get_var_type_func(caller, node_fname)
-                                serialized_param += ["MC:" + str(caller_type) + ":::" + node_snippet]
-                            else:
-                                serialized_param += [
-                                    "UN:" + "_" + ":::" + node.get_snippet(node_source).strip().replace("\n", " ")]
-                        print "SPS:\t" + class_full_name + "RRRRRRRR" + package_name + "RRRRRRRR" + "<>>>>>>>___".join(serialized_param)
+                                        caller = node
+                                        while caller.children:
+                                            caller = caller.children[0]
+                                        caller_snippet = caller.get_snippet(node_source).strip()
+                                        if "expr.ThisExpr" in caller.labels:
+                                            caller_type = node_class_full_name
+                                        elif caller_snippet.startswith("org.") or caller_snippet.startswith("java.") or \
+                                                caller_snippet[0].isupper():
+                                            caller_type = caller_snippet
+                                        else:
+                                            caller_type = get_var_type_func(caller, node_fname)
+                                    log_chunks += [("MC", str(caller_type), node_snippet)]
+                                else:
+                                    log_chunks += [("UN", "", node.get_snippet(node_source).strip().replace("\n", " "))]
+
+                            template = {"class": class_full_name, "source": fname,  "chunks": log_chunks}
+                            import json
+                            self.output.write(json.dumps(template) + "\n")
+                            #print "SPS:\t" + class_full_name + "RRRRRRRR" + package_name + "RRRRRRRR" + "<>>>>>>>___".join(serialized_param)
 
 
-print "started", len(full_type_markup)
-run_through_sources(extract_log_lines)
-
-
-
-
+if __name__ == "__main__":
+    import sys
+    import os
+    try:
+        index_location, output_loc = sys.argv[1:]
+    except:
+        #print "usage: python extract_log_templates.py <folder with indices> <output filename or - > [-d]"
+        #exit()
+        index_location, output_loc = "/home/arslan/src/tmp", "-"
+    LogExtractor(index_location, output_loc)
 
 
