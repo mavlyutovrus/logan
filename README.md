@@ -1,34 +1,37 @@
-#LogAn
+<h1>LogAn</h1>
  
-##Usage
  
-###Construction of templates
+<h2>Usage</h2>
  
-Btw: you can find templates built for Hadoop 2.3 in the directory ‘samples’
+<h3>Construction of templates</h3>
+ 
+Btw: you can find templates built for Hadoop 2.3 in the directory ‘samples’.
  
 You will need a folder with all source files (Hadoop, Spark, Zookeeper, etc. depending on your needs). Just download related sources, unpack them and put under one directory. The script will iterate over all subfolders and collect java files.
  
-####2 stages:
+2 stages:
+<ol>
+<li> Index construction:
  
-1) Index construction:
- 
-python logan/src/indexing.py “root_folder_with_all_sources” “folder4indices”
+<pre>python logan/src/indexing.py “root_folder_with_all_sources” “folder4indices”</pre>
  
 It will create two files in the folder for indices:
  
-markup.db - db for ASTs built on to of the source files (Notice: abstract syntax tree consume few times more space than the original source file)
+<i>markup.db</i> - db for ASTs built on to of the source files (Notice: abstract syntax tree consume few times more space than the original source file)
  
-source_index.b - composite of various indices that are necessary for expanding log expressions.
+<i>source_index.b</i> - composite of various indices that are necessary for expanding log expressions.
  
-2) extraction of log templates
+<li> extraction of log templates
  
-python extract_log_templates.py “folder4indices” “output filename or -”
+<pre>python logan/src/extract_log_templates.py “folder4indices” “output filename or -”</pre>
  
 Output filename - where to put extracted templates (if you put “-” then it will write templates to stdout)
  
 Notice: it is normal that the tool might extract many templates per one log call expression, since frequently there are several ways of how to expand or replace values of variable and expressions.
  
-###Parsing log messages
+</ol>
+ 
+<h3>Parsing log messages</h3>
  
 python logan/src/match_log_lines.py <path to bz2-compressed templates file> <input filename or - > <output filename or - >
  
