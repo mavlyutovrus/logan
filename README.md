@@ -17,7 +17,7 @@ You will need a folder with all source files (Hadoop, Spark, Zookeeper, etc. dep
  
 It will create two files in the folder for indices:
  
-<i>markup.db</i> - db for ASTs built on to of the source files (Notice: abstract syntax tree consume few times more space than the original source file)
+<i>markup.db</i> - DB for ASTs built from the java source files (Notice: abstract syntax tree consumes few times more space than the original source file)
  
 <i>source_index.b</i> - composite of various indices that are necessary for expanding log expressions.
  
@@ -27,7 +27,7 @@ It will create two files in the folder for indices:
  
 Output filename - where to put extracted templates (if you put “-” then it will write templates to stdout)
  
-Notice: it is normal that the tool might extract many templates per one log call expression, since frequently there are several ways of how to expand or replace values of variable and expressions.
+Notice: it is normal that the tool might extract many templates per one log call expression, since frequently there are several ways to expand or replace values of variables and expressions.
  
 </ol>
  
@@ -38,10 +38,12 @@ python logan/src/match_log_lines.py <path to bz2-compressed templates file> <inp
 Notice: the script expects bz2-compressed file with templates as a first parameter. You can find templates built for Hadoop 2.3 in the directory ‘samples’
  
 Input fname or stdin - log messages, one message per line. You can find a sample in the directory “samples”.
+ 
 Output fname or stdout - where to matched and parsed log messages.
  
 For every log line it produces a json of the following structure:
  
+<pre>
 {
     "matched_templates": [  // <---- list of matched templates
         {
@@ -71,5 +73,5 @@ For every log line it produces a json of the following structure:
     }
 }
  
- 
+</pre>
  
