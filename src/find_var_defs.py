@@ -111,11 +111,11 @@ def get_enum_val_declaration(node, class_node, source):
 
 
 """ find all places with varialbe declarations and attach it to a certain scope of visibility """
-def find_all_var_declarations(class_node, source):
+def find_all_var_declarations(class_node, source, go_in_classes=False):
     var_decs = []
     def process(stack):
         node = stack[-1]
-        if node != class_node and node.labels & CLASS_LABELS:
+        if not go_in_classes and node != class_node and node.labels & CLASS_LABELS:
             return False
         if "stmt.CatchClause" in node.labels:
             for item in get_var_decs_from_catch_clause(node):

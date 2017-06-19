@@ -39,18 +39,14 @@ class LogExtractor(object):
         self.output = output_loc == "-" and sys.stdout or open(output_loc, "w")
         self.extracted_log_templates = []
         processed = 0
-
-        #fname  = "/home/arslan/src/provenance/hadoop/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/src/main/java/org/apache/hadoop/yarn/server/timelineservice/storage/HBaseTimelineWriterImpl.java"
-        #root_node_str = self.markup_db[fname]
-        #if 1:
         for fname, root_node_str in self.markup_db.items():
-            root_node = FromString2Node(root_node_str)
-            self.extract_log_lines(fname, root_node)
-            self.output.flush()
             processed += 1
             if processed % 100 == 0:
                 self.logging.write("..processed " + str(processed) + "\n")
                 self.logging.flush()
+            root_node = FromString2Node(root_node_str)
+            self.extract_log_lines(fname, root_node)
+            self.output.flush()
         self.logging.close()
         self.output.flush()
 
@@ -126,7 +122,7 @@ class LogExtractor(object):
         if orig_fname == fname and orig_start > method_node.start and orig_end < method_node.end:
             origin_node = [node for node in all_nodes(method_node) if node.start == orig_start and node.end == orig_end][0]
             origin_value = \
-                       [cur_value_node for cur_var_name, _, cur_value_node, _ in find_all_var_declarations(method_node, source)
+                       [cur_value_node for cur_var_name, _, cur_value_node, _ in find_all_var_declarations(method_node, source, go_in_classes=True)
                                if cur_var_name.start == origin_node.start and cur_var_name.end == origin_node.end][0]
             if origin_value:
                 origin_expression = build_path(origin_value, method_node)[-2]
@@ -674,7 +670,6 @@ class LogExtractor(object):
                             if "expr.StringLiteralExpr" in const_value_node.labels:
                                 matched = True
                                 format_string += const_value_node.get_snippet(const_origin_source).strip()[1:-1]
-                                #print node.get_snippet(), subnode.get_snippet(source), format_string
                                 break
                         if matched:
                             continue
@@ -749,7 +744,7 @@ class LogExtractor(object):
         if not fname in self.fname2classes:
             return
         source = open(fname).read()
-        self.logging.write("[FILE] " + fname)
+        self.logging.write("[FILE] " + fname + "\n")
         for class_full_name in self.fname2classes[fname]:
             type_param_names, package_name, imports, extends_parsed_strs, (class_start, class_end, fname) = self.all_classes_decls[class_full_name]
             class_node = [node for node in all_nodes(file_node) if node.start == class_start and node.end == class_end][0]
@@ -762,8 +757,9 @@ class LogExtractor(object):
                 for log_call_stack in self.extract_log_calls_from_method_declartion(method_decl_node, source):
                     log_call_snippet = log_call_stack[-1].get_snippet(source).replace("\n", " ")
                     self.logging.write("[LOG CALL] " +
-                                       str((log_call_stack[-1].start, log_call_stack[-1].end)) + " " + log_call_snippet)
+                                       str((log_call_stack[-1].start, log_call_stack[-1].end)) + " " + log_call_snippet + "\n")
                     self.logging.flush()
+
                     def get_var_type_func(node, fname=fname):
                         key = (fname, node.start, node.end)
                         if key in self.full_type_markup and type(self.full_type_markup[key]) == tuple:
@@ -858,9 +854,10 @@ class LogExtractor(object):
                                 else:
                                     log_chunks += [("UN", "", node.get_snippet(node_source).strip().replace("\n", " "))]
 
-                            template = {"class": class_full_name, "source": fname,  "chunks": log_chunks, "logcall": log_call_snippet}
+                            template = {"class": class_full_name, "package": package_name, "source": fname,  "chunks": log_chunks, "logcall": log_call_snippet}
                             import json
                             self.output.write(json.dumps(template) + "\n")
+                            self.output.flush()
 
 
 if __name__ == "__main__":
@@ -869,9 +866,9 @@ if __name__ == "__main__":
     try:
         index_location, output_loc = sys.argv[1:]
     except:
-        print "usage: python extract_log_templates.py <folder with indices> <output filename or - > [-d]"
-        exit()
-        #index_location, output_loc = "/home/arslan/src/tmp", "templates.json"
+        #print "usage: python extract_log_templates.py <folder with indices> <output filename or - > [-d]"
+        #exit()
+        index_location, output_loc = "/home/arslan/src/tmp", "templates.json"
     LogExtractor(index_location, output_loc)
 
 
