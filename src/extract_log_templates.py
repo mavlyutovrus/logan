@@ -5,6 +5,7 @@ import shelve
 from find_var_defs import find_all_var_declarations
 
 THIS = 3224232434
+MAX_NUMBER_OF_CHAINS_PER_LOGLINE = 10000
 
 class LogExtractor(object):
     def __init__(self, index_folder, output_loc):
@@ -12,6 +13,9 @@ class LogExtractor(object):
         (self.all_names, self.all_packages, self.all_classes_decls,
                self.all_methods, self.all_public_vars, self.class2parents, self.full_type_markup) = \
                                 pickle.load(open(os.path.join(index_folder, "source_index.b"), "rb"))
+
+
+
         markup_db_loc = os.path.join(index_folder, "markup.db")
         self.markup_db = shelve.open(markup_db_loc, flag='r')
 
@@ -31,10 +35,14 @@ class LogExtractor(object):
             self.fname2classes.setdefault(fname, []).append(class_full_name)
         self.stack_of_expansions = []
 
-        self.logging = open("logging.txt", "w")
+        self.logging = sys.stderr #open("logging.txt", "w")
         self.output = output_loc == "-" and sys.stdout or open(output_loc, "w")
         self.extracted_log_templates = []
         processed = 0
+
+        #fname  = "/home/arslan/src/provenance/hadoop/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/src/main/java/org/apache/hadoop/yarn/server/timelineservice/storage/HBaseTimelineWriterImpl.java"
+        #root_node_str = self.markup_db[fname]
+        #if 1:
         for fname, root_node_str in self.markup_db.items():
             root_node = FromString2Node(root_node_str)
             self.extract_log_lines(fname, root_node)
@@ -378,7 +386,8 @@ class LogExtractor(object):
                                     for param_nodes in params:
                                         constitutes += param_nodes
                                 else:
-                                    print "ADFAFASDADFSA", method_name
+                                    pass
+                                    #print method_name
                         else:
                             constitutes = node.children[1:]
                             #print "CHEEECK:", [elem.get_snippet(source).replace("\n", " ") for elem in constitutes]
@@ -402,8 +411,8 @@ class LogExtractor(object):
                                     for param_nodes in params:
                                         constitutes += param_nodes
                                 else:
-                                    print "ADFAFASDADFSA", method_name
-                                # print "CHEEECK:", [elem.get_snippet(source).replace("\n", " ") for elem in constitutes]
+                                    #raise Exception()
+                                    pass
                             for constitute in constitutes:
                                 variable_assignement_nodes.append(constitute)
                             for position in xrange(node.start, node.end):
@@ -518,10 +527,7 @@ class LogExtractor(object):
                         new_outputs += [output + suffix]
                 outputs = new_outputs
             return outputs
-        if "expr.ConditionalExpr" in node.labels:
-            if len(node.children) != 3:
-                print "FUCKUP in conditional expression"
-                exit()
+        if "expr.ConditionalExpr" in node.labels and len(node.children) != 3:
             return self.expand(node.children[1], source, get_var_type_func, root_node, fname, class_full_name, class_node) + \
                    self.expand(node.children[2], source, get_var_type_func, root_node, fname, class_full_name, class_node)
 
@@ -661,10 +667,17 @@ class LogExtractor(object):
                 for subnode in all_nodes_post_order(params[0]):
                     if "expr.BinaryExpr" in subnode.labels:
                         continue
-                    if set(['expr.NameExpr', 'expr.SimpleName']) & subnode.labels and subnode.get_snippet(source) in globals:
-                        #print "YAMMI", subnode.get_snippet(source), globals[subnode.get_snippet(source)]
-                        format_string += globals[subnode.get_snippet(source)][0]
-                        continue
+                    if set(['expr.NameExpr', 'expr.SimpleName']) & subnode.labels:
+                        const_values = self.check_if_constant(subnode, source, fname)
+                        matched = False
+                        for _, _, _, const_origin_source, const_value_node in const_values:
+                            if "expr.StringLiteralExpr" in const_value_node.labels:
+                                matched = True
+                                format_string += const_value_node.get_snippet(const_origin_source).strip()[1:-1]
+                                #print node.get_snippet(), subnode.get_snippet(source), format_string
+                                break
+                        if matched:
+                            continue
                     if not "expr.StringLiteralExpr" in subnode.labels:
                         #print "111P", subnode.labels
                         #print node.get_snippet(source)
@@ -719,6 +732,7 @@ class LogExtractor(object):
         if not parameters:
             return None
         expanded_params_chains = [self.expand(param, source, get_var_type_func, log_call_stack[0], fname, class_full_name, class_node) for param in parameters]
+
         unrolled_chains = [[item] for item in expanded_params_chains[0]]
         expanded_params_chains = expanded_params_chains[1:]
         while expanded_params_chains:
@@ -735,6 +749,7 @@ class LogExtractor(object):
         if not fname in self.fname2classes:
             return
         source = open(fname).read()
+        self.logging.write("[FILE] " + fname)
         for class_full_name in self.fname2classes[fname]:
             type_param_names, package_name, imports, extends_parsed_strs, (class_start, class_end, fname) = self.all_classes_decls[class_full_name]
             class_node = [node for node in all_nodes(file_node) if node.start == class_start and node.end == class_end][0]
@@ -743,13 +758,12 @@ class LogExtractor(object):
 
             class_variables = find_all_var_declarations(class_node, source)
 
-            # "[CLASS]", class_full_name
             for method_decl_node in method_declarations:
-                #print "[METHOD]", method_decl_node.get_snippet(source).replace("\n", " ")[:300]
                 for log_call_stack in self.extract_log_calls_from_method_declartion(method_decl_node, source):
-                    #print
-                    #print fname, class_full_name
-                    #print "[LOG CALL]", (log_call_stack[-1].start, log_call_stack[-1].end), log_call_stack[-1].get_snippet(source).replace("\n", " ")
+                    log_call_snippet = log_call_stack[-1].get_snippet(source).replace("\n", " ")
+                    self.logging.write("[LOG CALL] " +
+                                       str((log_call_stack[-1].start, log_call_stack[-1].end)) + " " + log_call_snippet)
+                    self.logging.flush()
                     def get_var_type_func(node, fname=fname):
                         key = (fname, node.start, node.end)
                         if key in self.full_type_markup and type(self.full_type_markup[key]) == tuple:
@@ -758,8 +772,14 @@ class LogExtractor(object):
 
                     unrolled_log_line_elements = self.get_log_line_constitutes(log_call_stack, source, fname, class_full_name,
                                                                                class_node, get_var_type_func)
-                    if not unrolled_log_line_elements:
-                        continue
+
+                    #simple filter from explosions
+                    if len(unrolled_log_line_elements) > MAX_NUMBER_OF_CHAINS_PER_LOGLINE:
+                        self.logging.write("Trimmed, as the number of resolved chains %d > %d\n" %
+                                                            (len(unrolled_log_line_elements),
+                                                             MAX_NUMBER_OF_CHAINS_PER_LOGLINE))
+                        unrolled_log_line_elements = unrolled_log_line_elements[:MAX_NUMBER_OF_CHAINS_PER_LOGLINE]
+
                     if 1:
                         unrolled_log_line_elements_merged = []
                         if 1:
@@ -786,7 +806,7 @@ class LogExtractor(object):
                                             curr_param_index = int(placeholder[1:-1]) + 1
 
                                         if curr_param_index >= len(unrolled_param_set):
-                                            print "WTF:", [curr_param_index], unrolled_param_set
+                                            #raise Exception()
                                             curr_param_index = len(unrolled_param_set) - 1
                                         used_params.add(curr_param_index)
                                         final_set_of_nodes += unrolled_param_set[curr_param_index]
@@ -798,10 +818,8 @@ class LogExtractor(object):
                                     if not param_index in used_params:
                                         final_set_of_nodes += unrolled_param_set[param_index]
                                         added_param_sets += 1
-                                if added_param_sets + 1 != len(unrolled_param_set):
-                                    print "FADASDADSFADSFASDFASDFADAFUKUCUP", added_param_sets, len(unrolled_param_set)
-                                    print log_call_stack[-1].get_snippet(source)
-                                    print "----"
+                                #if added_param_sets + 1 != len(unrolled_param_set):
+                                #    raise Exception()
                                 unrolled_log_line_elements_merged += [final_set_of_nodes]
 
                         for log_line_nodes in unrolled_log_line_elements_merged:
@@ -823,7 +841,6 @@ class LogExtractor(object):
                                     node_snippet = node.get_snippet(node_source).strip().replace("\n", " ")
                                     if node_snippet.find("(") > 0 and node_snippet.find("(") < node.get_snippet(node_source).find(
                                             ".") or node.get_snippet(node_source).find(".") < 0:
-                                        # print "CHEEECK", node_snippet
                                         caller_type = node_class_full_name
                                     else:
                                         caller = node
@@ -841,10 +858,9 @@ class LogExtractor(object):
                                 else:
                                     log_chunks += [("UN", "", node.get_snippet(node_source).strip().replace("\n", " "))]
 
-                            template = {"class": class_full_name, "source": fname,  "chunks": log_chunks}
+                            template = {"class": class_full_name, "source": fname,  "chunks": log_chunks, "logcall": log_call_snippet}
                             import json
                             self.output.write(json.dumps(template) + "\n")
-                            #print "SPS:\t" + class_full_name + "RRRRRRRR" + package_name + "RRRRRRRR" + "<>>>>>>>___".join(serialized_param)
 
 
 if __name__ == "__main__":
@@ -853,9 +869,9 @@ if __name__ == "__main__":
     try:
         index_location, output_loc = sys.argv[1:]
     except:
-        #print "usage: python extract_log_templates.py <folder with indices> <output filename or - > [-d]"
-        #exit()
-        index_location, output_loc = "/home/arslan/src/tmp", "-"
+        print "usage: python extract_log_templates.py <folder with indices> <output filename or - > [-d]"
+        exit()
+        #index_location, output_loc = "/home/arslan/src/tmp", "templates.json"
     LogExtractor(index_location, output_loc)
 
 
