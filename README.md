@@ -33,7 +33,7 @@ Notice: it is normal that the tool might extract many templates per one log call
  
 <h3>Parsing log messages</h3>
  
-python logan/src/match_log_lines.py <path to bz2-compressed templates file> <input filename or - > <output filename or - >
+<pre>python logan/src/match_log_lines.py <path to bz2-compressed templates file> <input filename or - > <output filename or - > </pre>
  
 Notice: the script expects bz2-compressed file with templates as a first parameter. You can find templates built for Hadoop 2.3 in the directory ‘samples’
  
