@@ -14,8 +14,6 @@ class LogExtractor(object):
                self.all_methods, self.all_public_vars, self.class2parents, self.full_type_markup) = \
                                 pickle.load(open(os.path.join(index_folder, "source_index.b"), "rb"))
 
-
-
         markup_db_loc = os.path.join(index_folder, "markup.db")
         self.markup_db = shelve.open(markup_db_loc, flag='r')
 
@@ -39,6 +37,10 @@ class LogExtractor(object):
         self.output = output_loc == "-" and sys.stdout or open(output_loc, "w")
         self.extracted_log_templates = []
         processed = 0
+
+        #fname = "/home/arslan/src/provenance/hadoop/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/datanode/BlockReceiver.java"
+        #root_node_str = self.markup_db[fname]
+        #if 1:
         for fname, root_node_str in self.markup_db.items():
             processed += 1
             if processed % 100 == 0:
@@ -85,7 +87,6 @@ class LogExtractor(object):
         except:
             return []
         orig_file_tree =  FromString2Node(self.markup_db[orig_fname])
-
         origin_node = [node for node in all_nodes(orig_file_tree) if node.start == orig_start and node.end == orig_end][0]
         origin_class_full_name = ""
         class_start, class_end = -1, -1
@@ -95,7 +96,7 @@ class LogExtractor(object):
                     and len(cur_class_full_name) > len(origin_class_full_name):
                 origin_class_full_name = cur_class_full_name
                 class_start, class_end = cur_class_start, cur_class_end
-        full_name = origin_class_full_name + "." + origin_node.get_snippet(source)
+        full_name = origin_class_full_name + "." + origin_node.get_snippet(open(orig_fname, "r").read())
         if full_name in self.all_public_vars:
             value_node = self.all_public_vars[full_name][-2]
             if value_node:
@@ -660,25 +661,14 @@ class LogExtractor(object):
 
             if caller and caller.get_snippet(source) == "String" and method_name == "format":
                 format_string = ""
-                for subnode in all_nodes_post_order(params[0]):
-                    if "expr.BinaryExpr" in subnode.labels:
-                        continue
-                    if set(['expr.NameExpr', 'expr.SimpleName']) & subnode.labels:
-                        const_values = self.check_if_constant(subnode, source, fname)
-                        matched = False
-                        for _, _, _, const_origin_source, const_value_node in const_values:
-                            if "expr.StringLiteralExpr" in const_value_node.labels:
-                                matched = True
-                                format_string += const_value_node.get_snippet(const_origin_source).strip()[1:-1]
-                                break
-                        if matched:
-                            continue
-                    if not "expr.StringLiteralExpr" in subnode.labels:
-                        #print "111P", subnode.labels
-                        #print node.get_snippet(source)
-                        return [[(node, source, fname, class_full_name)]]
-                    format_string += subnode.get_snippet(source).strip()[1:-1]
-
+                format_string_assembled = False
+                for chain in self.expand(params[0], source, get_var_type_func, root_node, fname, class_full_name, class_node):
+                    if not [elem for elem in chain if not type(elem) == str]:
+                        format_string = "".join(chain)
+                        format_string_assembled = True
+                        break
+                if not format_string_assembled:
+                    return [[(node, source, fname, class_full_name)]]
                 import re
                 keys = re.findall("%[0-9\.]*[a-z]", format_string)
                 for key in keys:
@@ -866,9 +856,9 @@ if __name__ == "__main__":
     try:
         index_location, output_loc = sys.argv[1:]
     except:
-        #print "usage: python extract_log_templates.py <folder with indices> <output filename or - > [-d]"
-        #exit()
-        index_location, output_loc = "/home/arslan/src/tmp", "templates.json"
+        print "usage: python extract_log_templates.py <folder with indices> <output filename or - > [-d]"
+        exit()
+        #index_location, output_loc = "/home/arslan/src/tmp", "templates.json"
     LogExtractor(index_location, output_loc)
 
 

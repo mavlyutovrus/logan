@@ -131,6 +131,8 @@ if __name__ == "__main__":
     templates, index = upload_templates(bz2_templates_fname)
     sys.stderr.write("uploaded %d templates.\n" % (len(templates)))
     sys.stderr.flush()
+    matched = 0
+    processed = 0
     for message_line in input_stream:
         message = decompose_raw_log_message(message_line)
         matched_templates = find_all_matches(message, templates, index)
@@ -141,5 +143,12 @@ if __name__ == "__main__":
                                  "matched": matched_elements}))
         matches = {"message": message, "matched_templates": all_matches}
         output_stream.write(json.dumps(matches) + "\n")
+
+        processed += 1
+        if all_matches:
+            matched += 1
+        if processed % 10000 == 0:
+            sys.stderr.write("..processed %d, matched %d\n" % (processed, matched))
+
 
 
