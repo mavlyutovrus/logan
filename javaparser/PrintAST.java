@@ -33,6 +33,7 @@ public class PrintAST {
                CompilationUnit cu = JavaParser.parse(new FileInputStream(fname));
                iter(cu.getChildNodes());
            } catch (Exception e) {
+               Output.write("<CUT>");
            }
            Output.write("\n");
            Output.flush();
