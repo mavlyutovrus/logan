@@ -29,8 +29,11 @@ public class PrintAST {
        String fname;
        while ((fname = reader.readLine()) != null) {
            Output.write(fname + "\t");
-           CompilationUnit cu = JavaParser.parse(new FileInputStream(fname));
-           iter(cu.getChildNodes());
+           try {
+               CompilationUnit cu = JavaParser.parse(new FileInputStream(fname));
+               iter(cu.getChildNodes());
+           } catch (Exception e) {
+           }
            Output.write("\n");
            Output.flush();
        }
