@@ -41,6 +41,8 @@ class LogExtractor(object):
         #fname = "/home/arslan/src/provenance/hadoop/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/datanode/BlockReceiver.java"
         #root_node_str = self.markup_db[fname]
         #if 1:
+      
+        self.logging.write("Total sources " + str(len(self.markup_db)) + "\n")
         for fname, root_node_str in self.markup_db.items():
             processed += 1
             if processed % 100 == 0:
@@ -60,8 +62,9 @@ class LogExtractor(object):
             if "expr.MethodCallExpr" in node.labels:
                 method_call_text = node.get_snippet(source).lower()
                 pre_call_snippet = method_call_text.split("(")[0].strip()
-                if pre_call_snippet.endswith("log.debug") or pre_call_snippet.endswith("log.warn") \
-                        or pre_call_snippet.endswith("log.info") or pre_call_snippet.endswith("logauditmessage"):
+                if "log" in pre_call_snippet and \
+                       ("info" in pre_call_snippet or "warn" in pre_call_snippet or "debug" in pre_call_snippet) or \
+                         "logauditmessage" in pre_call_snippet:
                     log_call_stacks.append([item for item in node_stack])
                     return False
             return True
@@ -731,10 +734,11 @@ class LogExtractor(object):
         return unrolled_chains
 
     def extract_log_lines(self, fname, file_node):
+        self.logging.write("[FILE] " + fname + "\n")
         if not fname in self.fname2classes:
+            self.logging.write("..no classes\n")
             return
         source = open(fname).read()
-        self.logging.write("[FILE] " + fname + "\n")
         for class_full_name in self.fname2classes[fname]:
             type_param_names, package_name, imports, extends_parsed_strs, (class_start, class_end, fname) = self.all_classes_decls[class_full_name]
             class_node = [node for node in all_nodes(file_node) if node.start == class_start and node.end == class_end][0]

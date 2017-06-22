@@ -56,10 +56,27 @@ def decompose_raw_log_message(message):
                                                   message[message_level_end + 1:source_end],
                                                   message[source_end + 1:].strip()
                                                   )
-    timestamp, millisec = timestamp.split(",")
+    try:
+      timestamp1, millisec = timestamp.split(",")
+      timestamp = timestamp1
+    except:
+      #no millisecs
+      millisec = 0.0
+      pass
+    timestamp = timestamp.replace("-", ":").replace("/", ":")
     from datetime import datetime
     import time
-    epoch = time.mktime(datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').timetuple()) + float(millisec) / 1000.0
+    try:
+      epoch = time.mktime(datetime.strptime(timestamp, '%Y:%m:%d %H:%M:%S').timetuple()) + float(millisec) / 1000.0
+    except Exception as e:
+      epoch = 0
+    if not epoch:
+      try:
+        epoch = time.mktime(datetime.strptime(timestamp, '%y:%m:%d %H:%M:%S').timetuple()) + float(millisec) / 1000.0
+      except Exception as e:
+        epoch = 0
+    if not epoch:
+      raise Exception("parsing error", "failed parsing timestamp:" + timestamp)
     message = {"epoch": epoch, "level": msg_level, "source": msg_source, "text":msg_text}
     return message
 
@@ -134,7 +151,10 @@ if __name__ == "__main__":
     matched = 0
     processed = 0
     for message_line in input_stream:
-        message = decompose_raw_log_message(message_line)
+        try:
+          message = decompose_raw_log_message(message_line)
+        except:
+          continue
         matched_templates = find_all_matches(message, templates, index)
         all_matches = []
         for templ_index, matched_elements in matched_templates:

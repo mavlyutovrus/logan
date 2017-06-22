@@ -78,6 +78,10 @@ if __name__ == "__main__":
     for batch_start in xrange(0, len(sources_fnames), BATCH_SIZE):
         print "\tbatch", batch_start, "-", batch_start + BATCH_SIZE
         for fname, root_node in build_asts(sources_fnames[batch_start:batch_start + BATCH_SIZE]):
+            processed += 1
+            if not root_node:
+              print "..skipped", fname
+              continue
             markup_db[fname] = root_node.ToString()
     markup_db.sync()
 

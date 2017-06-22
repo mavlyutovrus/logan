@@ -819,6 +819,9 @@ def build_asts(source_fnames):
     for line in output.strip().split("\n"):
         markup_serialized = line.strip().split("\t")
         fname = markup_serialized.pop(0)
+        if line.endswith("<CUT>"):
+          yield (fname, None)
+          continue
         source = open(fname).read()
         line_offsets = get_line_offsets(source)
         markup = {}
