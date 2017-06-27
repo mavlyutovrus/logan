@@ -50,7 +50,8 @@ def upload_templates(bz2_fname):
 def decompose_raw_log_message(message):
     timestamp_end = message.find(" ", message.find(" ") + 1)
     message_level_end = message.find(" ", timestamp_end + 1)
-    source_end = message.find(": ", message_level_end + 1)
+    #source_end = message.find(": ", message_level_end + 1)
+    source_end = message.find("- ", message_level_end + 1)
     timestamp, msg_level, msg_source, msg_text = (message[:timestamp_end],
                                                   message[timestamp_end + 1:message_level_end],
                                                   message[message_level_end + 1:source_end],
