@@ -760,8 +760,13 @@ class LogExtractor(object):
                             return self.full_type_markup[key][0]
                         return None
 
-                    unrolled_log_line_elements = self.get_log_line_constitutes(log_call_stack, source, fname, class_full_name,
+                    try:
+                      unrolled_log_line_elements = self.get_log_line_constitutes(log_call_stack, source, fname, class_full_name,
                                                                                class_node, get_var_type_func)
+                    except Exception as ex:
+                      self.logging.write("[ERROR] Failed to parse log call: " + str(ex) + "\n")
+                      self.logging.flush()
+                      continue
 
                     #simple filter from explosions
                     if not unrolled_log_line_elements:
