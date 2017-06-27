@@ -43,7 +43,8 @@ def get_var_decs_from_var_def(def_node, class_node, source):
         # ['stmt.CatchClause', 'body.Parameter'] case
         return []
     type_node_index = 0
-    while set(['expr.NormalAnnotationExpr', 'expr.MarkerAnnotationExpr', 'expr.SingleMemberAnnotationExpr']) & def_node.children[type_node_index].labels:
+    while set(['comments.LineComment', 'expr.NormalAnnotationExpr', 
+               'expr.MarkerAnnotationExpr', 'expr.SingleMemberAnnotationExpr']) & def_node.children[type_node_index].labels:
         type_node_index += 1
     type_node = None
     while type_node_index < len(def_node.children) and \

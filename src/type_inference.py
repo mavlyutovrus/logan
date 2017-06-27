@@ -390,9 +390,10 @@ def infer_types_of_vars_impl(fname, nodes, all_packages, all_names, all_public_v
             try:
               caller_node, method_name_node, method_type_values_nodes, param_nodes = decompose_method_call(method_call,
                                                                                                          source)
-            except:
-              raise Exception("parse error",  "can't parse method call: " + method_call.get_snippet(source).replace("\n", " ") + "\nfname:" + fname)
-              exit(1)
+            except Exception as ex:
+              sys.stderr.write("Exception while parsing method call [" + method_call.get_snippet(source) + 
+                               "], exception: " + str(ex) + "\n")
+              continue
             method_name = method_name_node.get_snippet(source)
             stat[0] += 1
             hypos = method_name in method_name2full_names and method_name2full_names[method_name] or []
