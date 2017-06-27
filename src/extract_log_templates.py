@@ -289,7 +289,7 @@ class LogExtractor(object):
                 caller_class_node = None
                 caller_class_full_name = ""
 
-                for cur_class_full_name in self.fname2classes[caller_fname]:
+                for cur_class_full_name in self.fname2classes.get(caller_fname, []):
                     cur_class_start, cur_class_end, _ = self.all_classes_decls[cur_class_full_name][-1]
                     if cur_class_start <= caller_method_node.start and cur_class_end >= caller_method_node.end \
                                     and len(cur_class_full_name) > len(caller_class_full_name):
@@ -764,6 +764,8 @@ class LogExtractor(object):
                                                                                class_node, get_var_type_func)
 
                     #simple filter from explosions
+                    if not unrolled_log_line_elements:
+                        continue
                     if len(unrolled_log_line_elements) > MAX_NUMBER_OF_CHAINS_PER_LOGLINE:
                         self.logging.write("Trimmed, as the number of resolved chains %d > %d\n" %
                                                             (len(unrolled_log_line_elements),
