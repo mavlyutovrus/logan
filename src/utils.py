@@ -544,6 +544,13 @@ class TNode:
     def get_snippet(self, source):
         return source[self.start:self.end]
 
+    def find_subnode(self, start, end):
+        if self.start == start and self.end == end:
+            return self
+        for child in self.children:
+            if child.start <= start and child.end >= end:
+                return child.find_subnode(start, end)
+        return None
 
     """ other_markup - list of (start, end, labels, color), labels - set, color - str to highlight """
     def create_html(self, source, other_markup):
