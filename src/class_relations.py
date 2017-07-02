@@ -10,12 +10,34 @@ MAX_NUMBER_OF_CHAINS_PER_LOGLINE = 10000
 class ClassRelations(object):
     def __init__(self, index_folder, output_loc):
         self.index_folder = index_folder
+
+
+        markup_db_loc = os.path.join(index_folder, "fname2markup.txt")
+        self.markup_db = {}
+        for line in open(markup_db_loc):
+            delim = line.find("|||")
+            fname, markup = line[:delim], line[delim + 3:]
+            self.markup_db[fname] = markup
+        print "markup loaded", len(self.markup_db)
+
         (self.all_names, self.all_packages, self.all_classes_decls,
                self.all_methods, self.all_public_vars, self.class2parents, self.full_type_markup) = \
                                 pickle.load(open(os.path.join(index_folder, "source_index.b"), "rb"))
 
-        markup_db_loc = os.path.join(index_folder, "markup.db")
-        self.markup_db = shelve.open(markup_db_loc, flag='r')
+        print "indices loaded"
+
+        self.class2pub_vars = {}
+        for full_var_name, (var_name_node,
+                              type_node,
+                              full_type,
+                              value_node,
+                              fname) in self.all_public_vars.items():
+            hosting_class_name = ".".join(full_var_name.split(".")[:-1])
+            self.class2pub_vars.setdefault(hosting_class_name, []).append((var_name_node, full_type))
+
+
+        #markup_db_loc = os.path.join(index_folder, "markup.db")
+        #self.markup_db = shelve.open(markup_db_loc, flag='r')
 
         self.full_method_name2calls = {}
         for (fname, call_start, call_end), full_method_name in self.full_type_markup.items():
@@ -44,21 +66,33 @@ class ClassRelations(object):
       
         self.logging.write("Total sources " + str(len(self.markup_db)) + "\n")
 
-
         for fname, full_class_names in self.fname2classes.items():
+            local_fname = fname.replace("/home/arslan/logan/src", "/Users/arslan/logan")
+            source = open(local_fname).read()
+            root_node = FromString2Node(self.markup_db[fname])
             for full_class_name in full_class_names:
                 (type_param_names, package_name, imports, extends_parsed_strs,
                             (class_start, class_end, fname)) = self.all_classes_decls[full_class_name]
+                class_node = root_node.find_subnode(class_start, class_end)
+                known_parents = [parent_full_name for parent_full_name in self.class2parents.get(full_class_name, []) \
+                                                    if parent_full_name in self.all_classes_decls]
+                pub_vars = set([(full_type, var_name_node.get_snippet(source))
+                                for var_name_node, full_type in self.class2pub_vars.get(full_class_name, [])
+                                     # if full_type in self.all_classes_decls
+                                      ])
+                method_declarations = [node for node in class_node.children \
+                                       if set(["body.MethodDeclaration", "body.ConstructorDeclaration"]) & node.labels]
+                
+                print full_class_name
+                print "\t", hosted_classes
 
 
-        for fname, root_node_str in self.markup_db.items():
-            processed += 1
-            if processed % 100 == 0:
-                self.logging.write("..processed " + str(processed) + "\n")
-                self.logging.flush()
-            root_node = FromString2Node(root_node_str)
-            print fname
-            self.output.flush()
+
+
+
+
+
+
         self.logging.close()
         self.output.flush()
 
@@ -873,8 +907,8 @@ class ClassRelations(object):
 if __name__ == "__main__":
     import sys
     import os
-    index_location, output_loc = sys.argv[1:]
-    #index_location, output_loc = "/Users/arslan/logan/ind30", "graph.txt"
+    #index_location, output_loc = sys.argv[1:]
+    index_location, output_loc = "/Users/arslan/logan/ind30yarn", "graph.txt"
     ClassRelations(index_location, output_loc)
 
 
